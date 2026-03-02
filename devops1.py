@@ -7,4 +7,6 @@ new_instances = ec2.create_instances(
              ImageId='ami-0f3caa1cf4417e51b',
              MinCount=1,
              MaxCount=1,
-             InstanceType='t2.nano')
+             InstanceType='t2.nano',
+             KeyName='my-key-pair',
+             UserData=open('userdata.sh', 'rb').read())
