@@ -1,27 +1,18 @@
 import os
+import json
 import boto3
 from botocore.exceptions import ClientError
+
+from utils.dotenv import load_dotenv
 
 REGION = 'us-east-1'
 SECURITY_GROUP_NAME = 'devops1-sg'
 
 
-def _load_dotenv():
-    """Load environment variables from .env file"""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-    if not os.path.isfile(path):
-        return
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                k, v = line.split('=', 1)
-                os.environ.setdefault(k.strip(), v.strip())
-
-
-_load_dotenv()
+load_dotenv()
 KEY_NAME = os.environ.get('KEY_NAME', 'devops1-key')
 PEM_FILE = os.environ.get('PEM_FILE', f'{KEY_NAME}.pem')
+STATE_FILE = os.environ.get('DEVOPS_STATE_FILE', 'devops-state.json')
 
 ec2_client = boto3.client('ec2', region_name=REGION)
 ec2 = boto3.resource('ec2', region_name=REGION)
@@ -97,11 +88,38 @@ def launch_instance(key_name, security_group_id):
     return instances[0]
 
 
+def _state_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), STATE_FILE)
+
+
+def _read_state():
+    path = _state_path()
+    if not os.path.isfile(path):
+        return {'instances': []}
+    with open(path) as f:
+        return json.load(f)
+
+
+def _write_state(state):
+    with open(_state_path(), 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def add_instance_to_state(instance_id):
+    """Append a created instance ID to the state file for teardown."""
+    state = _read_state()
+    state.setdefault('instances', [])
+    if instance_id not in state['instances']:
+        state['instances'].append(instance_id)
+    _write_state(state)
+
+
 def main():
     vpc_id = get_default_vpc_id()
     key_name = create_key_pair()
     sg_id = create_security_group(vpc_id)
     instance = launch_instance(key_name, sg_id)
+    add_instance_to_state(instance.id)
     print(f'Launched instance: {instance.id}')
     print(f'Key pair saved to: {PEM_FILE}')
     print(f'Security group: {sg_id}')
