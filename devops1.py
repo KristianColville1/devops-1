@@ -55,7 +55,15 @@ def create_key_pair():
 
 
 def create_security_group(vpc_id):
-    """Create a security group allowing SSH on 22 and HTTP on 80"""
+    """Create a security group allowing SSH (22) and HTTP (80), or return existing one."""
+    sgs = ec2_client.describe_security_groups(
+        Filters=[
+            {'Name': 'vpc-id', 'Values': [vpc_id]},
+            {'Name': 'group-name', 'Values': [SECURITY_GROUP_NAME]},
+        ],
+    )
+    if sgs['SecurityGroups']:
+        return sgs['SecurityGroups'][0]['GroupId']
     sg = ec2_client.create_security_group(
         GroupName=SECURITY_GROUP_NAME,
         Description='SSH and HTTP for devops1 web server',
@@ -65,8 +73,8 @@ def create_security_group(vpc_id):
     ec2_client.authorize_security_group_ingress(
         GroupId=sg_id,
         IpPermissions=[
-            {'FromPort': 22, 'ToPort': 22, 'IpProtocol': 'tcp', 'CidrIp': '0.0.0.0/0'},
-            {'FromPort': 80, 'ToPort': 80, 'IpProtocol': 'tcp', 'CidrIp': '0.0.0.0/0'},
+            {'FromPort': 22, 'ToPort': 22, 'IpProtocol': 'tcp', 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+            {'FromPort': 80, 'ToPort': 80, 'IpProtocol': 'tcp', 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
         ],
     )
     return sg_id
