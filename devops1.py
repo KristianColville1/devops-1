@@ -13,6 +13,7 @@ load_dotenv()
 KEY_NAME = os.environ.get('KEY_NAME', 'devops1-key')
 PEM_FILE = os.environ.get('PEM_FILE', f'{KEY_NAME}.pem')
 STATE_FILE = os.environ.get('DEVOPS_STATE_FILE', 'devops-state.json')
+USERDATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'userdata.sh')
 
 ec2_client = boto3.client('ec2', region_name=REGION)
 ec2 = boto3.resource('ec2', region_name=REGION)
@@ -46,7 +47,7 @@ def create_key_pair():
 
 
 def create_security_group(vpc_id):
-    """Create a security group allowing SSH (22) and HTTP (80), or return existing one."""
+    """Create security group with SSH (22) and HTTP (80) from 0.0.0.0/0, or return existing one"""
     sgs = ec2_client.describe_security_groups(
         Filters=[
             {'Name': 'vpc-id', 'Values': [vpc_id]},
@@ -61,30 +62,39 @@ def create_security_group(vpc_id):
         VpcId=vpc_id,
     )
     sg_id = sg['GroupId']
-    ec2_client.authorize_security_group_ingress(
-        GroupId=sg_id,
-        IpPermissions=[
-            {'FromPort': 22, 'ToPort': 22, 'IpProtocol': 'tcp', 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
-            {'FromPort': 80, 'ToPort': 80, 'IpProtocol': 'tcp', 'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
-        ],
-    )
+    for port, desc in [(22, 'SSH'), (80, 'HTTP')]:
+        ec2_client.authorize_security_group_ingress(
+            GroupId=sg_id,
+            IpPermissions=[{
+                'FromPort': port,
+                'ToPort': port,
+                'IpProtocol': 'tcp',
+                'IpRanges': [{'CidrIp': '0.0.0.0/0', 'Description': desc}],
+            }],
+        )
     return sg_id
 
 
 def launch_instance(key_name, security_group_id):
     """Launch EC2 instance with the given key pair and security group"""
-    with open('userdata.sh', 'rb') as f:
+    if not os.path.isfile(USERDATA_FILE):
+        raise FileNotFoundError(f'UserData script not found: {USERDATA_FILE}')
+    with open(USERDATA_FILE, 'rb') as f:
         user_data = f.read()
-    instances = ec2.create_instances(
-        ImageId='ami-0f3caa1cf4417e51b',
-        MinCount=1,
-        MaxCount=1,
-        InstanceType='t2.nano',
-        KeyName=key_name,
-        SecurityGroupIds=[security_group_id],
-        Placement={'AvailabilityZone': 'us-east-1b'},
-        UserData=user_data,
-    )
+    print(f'Using userdata: {USERDATA_FILE} ({len(user_data)} bytes)')
+    try:
+        instances = ec2.create_instances(
+            ImageId='ami-0f3caa1cf4417e51b',
+            MinCount=1,
+            MaxCount=1,
+            InstanceType='t2.nano',
+            KeyName=key_name,
+            SecurityGroupIds=[security_group_id],
+            Placement={'AvailabilityZone': 'us-east-1b'},
+            UserData=user_data,
+        )
+    except ClientError as e:
+        raise RuntimeError(f'Failed to launch instance: {e}') from e
     return instances[0]
 
 
@@ -115,14 +125,28 @@ def add_instance_to_state(instance_id):
 
 
 def main():
-    vpc_id = get_default_vpc_id()
-    key_name = create_key_pair()
-    sg_id = create_security_group(vpc_id)
-    instance = launch_instance(key_name, sg_id)
-    add_instance_to_state(instance.id)
-    print(f'Launched instance: {instance.id}')
-    print(f'Key pair saved to: {PEM_FILE}')
-    print(f'Security group: {sg_id}')
+    try:
+        print('Getting default VPC...')
+        vpc_id = get_default_vpc_id()
+        print('Setting up key pair...')
+        key_name = create_key_pair()
+        print('Creating security group...')
+        sg_id = create_security_group(vpc_id)
+        print('Launching instance (userdata will run on boot)...')
+        instance = launch_instance(key_name, sg_id)
+        add_instance_to_state(instance.id)
+        print(f'Launched instance: {instance.id}')
+        print(f'Key pair saved to: {PEM_FILE}')
+        print(f'Security group: {sg_id}')
+    except FileNotFoundError as e:
+        print(f'Error: {e}')
+        raise
+    except ClientError as e:
+        print(f'AWS error: {e.response["Error"].get("Code", "Unknown")} - {e.response["Error"].get("Message", str(e))}')
+        raise
+    except Exception as e:
+        print(f'Error: {e}')
+        raise
 
 
 if __name__ == '__main__':
