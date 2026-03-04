@@ -1,12 +1,13 @@
 import os
 import json
+import time
 import boto3
 from botocore.exceptions import ClientError
 
 from utils.dotenv import load_dotenv
 
 REGION = 'us-east-1'
-SECURITY_GROUP_NAME = 'devops1-sg'
+SECURITY_GROUP_NAME_PREFIX = 'devops1-sg'
 
 
 load_dotenv()
@@ -47,17 +48,10 @@ def create_key_pair():
 
 
 def create_security_group(vpc_id):
-    """Create security group with SSH (22) and HTTP (80) from 0.0.0.0/0, or return existing one"""
-    sgs = ec2_client.describe_security_groups(
-        Filters=[
-            {'Name': 'vpc-id', 'Values': [vpc_id]},
-            {'Name': 'group-name', 'Values': [SECURITY_GROUP_NAME]},
-        ],
-    )
-    if sgs['SecurityGroups']:
-        return sgs['SecurityGroups'][0]['GroupId']
+    """Create a new security group with SSH (22) and HTTP (80) from 0.0.0.0/0"""
+    name = f'{SECURITY_GROUP_NAME_PREFIX}-{int(time.time())}'
     sg = ec2_client.create_security_group(
-        GroupName=SECURITY_GROUP_NAME,
+        GroupName=name,
         Description='SSH and HTTP for devops1 web server',
         VpcId=vpc_id,
     )
