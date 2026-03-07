@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import boto3
 from botocore.exceptions import ClientError
 
@@ -48,8 +47,11 @@ def create_key_pair():
 
 
 def create_security_group(vpc_id):
-    """Create a new security group with SSH (22) and HTTP (80) from 0.0.0.0/0"""
-    name = f'{SECURITY_GROUP_NAME_PREFIX}-{int(time.time())}'
+    """Create a new security group with SSH (22) and HTTP (80) from 0.0.0.0/0.
+    Uses an iterated name (devops1-sg-1, devops1-sg-2, ...) so each run gets a new SG."""
+    state = _read_state()
+    next_index = state.get('next_sg_index', 1)
+    name = f'{SECURITY_GROUP_NAME_PREFIX}-{next_index}'
     sg = ec2_client.create_security_group(
         GroupName=name,
         Description='SSH and HTTP for devops1 web server',
@@ -66,6 +68,9 @@ def create_security_group(vpc_id):
                 'IpRanges': [{'CidrIp': '0.0.0.0/0', 'Description': desc}],
             }],
         )
+    state['next_sg_index'] = next_index + 1
+    state.setdefault('security_groups', []).append(sg_id)
+    _write_state(state)
     return sg_id
 
 
@@ -78,7 +83,7 @@ def launch_instance(key_name, security_group_id):
     print(f'Using userdata: {USERDATA_FILE} ({len(user_data)} bytes)')
     try:
         instances = ec2.create_instances(
-            ImageId='ami-0f3caa1cf4417e51b',
+            ImageId='ami-02dfbd4ff395f2a1b',
             MinCount=1,
             MaxCount=1,
             InstanceType='t2.nano',
