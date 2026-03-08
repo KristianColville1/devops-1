@@ -49,6 +49,9 @@ S3_BUCKET_PREFIX = "kcolville"
 LOGO_URL = "http://devops.setudemo.net/logo.jpg"
 WEBSITES_FILENAME = "kcolville-websites.txt"
 
+# AMI creation: name format XX-YYYY-MM-DD-microseconds (XX = initials)
+AMI_NAME_PREFIX = "kc"
+
 # -----------------------------------------------------------------------------
 # AWS clients
 # -----------------------------------------------------------------------------
@@ -432,6 +435,37 @@ def run_cloudwatch():
 
 
 # -----------------------------------------------------------------------------
+# AMI: create image from specified instance (instance ID required)
+# -----------------------------------------------------------------------------
+
+
+def run_ami(instance_id):
+    """Create an AMI from the given instance. Name format: XX-YYYY-MM-DD-microseconds."""
+    if not instance_id or not instance_id.strip():
+        print("Error: instance ID is required.")
+        print("Usage: devops1.py ami <instance-id>")
+        sys.exit(1)
+    instance_id = instance_id.strip()
+    now = datetime.now(timezone.utc)
+    ami_name = f"{AMI_NAME_PREFIX}-{now.strftime('%Y-%m-%d')}-{now.strftime('%f')[:6]}"
+    try:
+        r = ec2_client.create_image(
+            InstanceId=instance_id,
+            Name=ami_name,
+            Description=f"AMI from {instance_id} (devops1)",
+            NoReboot=True,
+        )
+        ami_id = r["ImageId"]
+        print(f"Creating AMI from instance {instance_id}")
+        print(f"AMI ID: {ami_id}")
+        print(f"Name: {ami_name}")
+        print("AMI is created asynchronously check EC2 console for status.")
+    except ClientError as e:
+        print(f"Failed to create AMI: {e}")
+        sys.exit(1)
+
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 
@@ -487,7 +521,13 @@ if __name__ == "__main__":
         run_teardown()
     elif cmd == "cloudwatch":
         run_cloudwatch()
+    elif cmd == "ami":
+        if len(sys.argv) < 3:
+            print("Error: instance ID is required for ami command.")
+            print("Usage: devops1.py ami <instance-id>")
+            sys.exit(1)
+        run_ami(sys.argv[2])
     else:
         print(f"Unknown command: {sys.argv[1]}")
-        print("Usage: devops1.py [teardown | cloudwatch]")
+        print("Usage: devops1.py [teardown | cloudwatch | ami <instance-id>]")
         sys.exit(1)
